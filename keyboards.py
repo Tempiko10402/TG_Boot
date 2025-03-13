@@ -5,10 +5,10 @@ def get_main_kb(locale: dict):
         types.InlineKeyboardButton(locale["language"], callback_data="change_lang"),
     )
     keyboard.row(
-        types.InlineKeyboardButton(locale["address"], callback_data="show_address"),
+        types.InlineKeyboardButton(locale["tracking"], callback_data="tracking"),  # Новая кнопка
+        types.InlineKeyboardButton(locale["my_profile"], callback_data="view_profile"),  # Новая кнопка
     )
     keyboard.row(
-        types.InlineKeyboardButton(locale["support"], url="https://t.me/username"),
-        types.InlineKeyboardButton(locale["instruction"], callback_data="instruction"),
+        types.InlineKeyboardButton(locale["address"], callback_data="show_address"),
     )
     return keyboard
