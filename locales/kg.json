@@ -20,5 +20,11 @@
   "instruction_text": "Нускамалар жеткиликтүү эмес",
   "register": "Каттоо",
   "registration_success": "Сиз ийгиликтүү катталдыңыз!",
-  "already_registered": "Сиз мурунтан эле катталгансыз."
+  "already_registered": "Сиз мурунтан эле катталгансыз.",
+  "my_profile": "Менин профилим",
+  "profile_info": "Сиздин профилиңиз",
+  "your_name": "Сиздин атыңыз",
+  "your_language": "Сиздин тилиңиз",
+  "no_name": "Аты көрсөтүлгөн жок",
+  "back": "Артка"
 }

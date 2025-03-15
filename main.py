@@ -27,7 +27,7 @@ def load_locale(lang: str) -> dict:
 def get_main_kb(locale: dict):
     keyboard = types.InlineKeyboardMarkup()
     keyboard.row(
-        types.InlineKeyboardButton(locale["profile"], callback_data="edit_profile"),
+        types.InlineKeyboardButton(locale.get("my_profile", "Мой профиль"), callback_data="my_profile"),
         types.InlineKeyboardButton(locale["language"], callback_data="change_lang"),
     )
     keyboard.row(
@@ -40,6 +40,16 @@ def get_main_kb(locale: dict):
     )
     return keyboard
 
+def get_profile_menu(locale: dict):
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.row(
+        types.InlineKeyboardButton(locale["profile"], callback_data="edit_profile"),
+    )
+    keyboard.row(
+        types.InlineKeyboardButton(locale.get("back", "Назад"), callback_data="back_to_main"),
+    )
+    return keyboard
+
 def get_lang_kb():
     keyboard = types.InlineKeyboardMarkup()
     keyboard.row(
@@ -48,6 +58,17 @@ def get_lang_kb():
     )
     print(f"[DEBUG] get_lang_kb: Клавиатура языков создана")
     return keyboard
+
+def get_profile_info(user_data: dict, loc: dict) -> str:
+    name = user_data.get("name", loc.get("no_name", "Имя не указано"))
+    address = user_data.get("address", loc.get("no_address", "Адрес не указан"))
+    lang = "Русский 🇷🇺" if user_data["lang"] == "ru" else "Кыргызский 🇰🇬"
+    return (
+        f"**{loc.get('profile_info', 'Ваш профиль')}:**\n\n"
+        f"📛 {loc.get('your_name', 'Ваше имя')}: `{name}`\n"
+        f"🏠 {loc.get('your_address', 'Ваш адрес')}: `{address}`\n"
+        f"🌐 {loc.get('your_language', 'Ваш язык')}: `{lang}`"
+    )
 
 # Обработчики
 @bot.message_handler(commands=["start"])
@@ -74,7 +95,6 @@ def start_handler(message: types.Message):
             text,
             reply_markup=get_main_kb(loc)
         )
-        
     except Exception as e:
         import traceback
         print(f"[ERROR] Start handler error for user_id {user_id}: {e}\n{traceback.format_exc()}")
@@ -86,7 +106,7 @@ def callback_handler(call):
     data = call.data
     print(f"[DEBUG] Callback: user_id={user_id}, data={data}")
     user = db.get_user(user_id)
-    loc = load_locale(user["lang"] if user else "ru")  # Загружаем локализацию по умолчанию, если пользователь не найден
+    loc = load_locale(user["lang"] if user else "ru")
 
     try:
         if data == "edit_profile":
@@ -121,6 +141,17 @@ def callback_handler(call):
                 f"**{your_address_text}:**\n\n`{address}`",
                 parse_mode="Markdown"
             )
+
+        elif data == "my_profile":
+            print(f"[DEBUG] My profile button pressed for {user_id}")
+            if not user:
+                bot.send_message(call.message.chat.id, "⚠️ Сначала зарегистрируйтесь.")
+                return
+            profile_info = get_profile_info(user, loc)
+            bot.send_message(call.message.chat.id, profile_info, parse_mode="Markdown", reply_markup=get_profile_menu(loc))
+
+        elif data == "back_to_main":
+            bot.send_message(call.message.chat.id, loc.get("help", "Используйте кнопки ниже:"), reply_markup=get_main_kb(loc))
 
         elif data == "instruction":
             bot.send_message(call.message.chat.id, loc.get("instruction_text", "Инструкция недоступна"))
@@ -159,50 +190,40 @@ def set_name(message):
     user_id = message.from_user.id
     print(f"[DEBUG] set_name: Получено сообщение от {user_id}, текст: {message.text}")
     try:
-        # Проверяем, существует ли пользователь
         if not db.user_exists(user_id):
             print(f"[DEBUG] set_name: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
-        # Обновляем имя
         db.update_name(user_id, message.text)
         user_data = db.get_user(user_id)
         print(f"[DEBUG] set_name: Данные после обновления: {user_data}")
 
-        # Удаляем состояние
         bot.delete_state(user_id, message.chat.id)
-
-        # Отправляем подтверждение
         loc = load_locale(user_data["lang"])
         bot.send_message(message.chat.id, loc["name_updated"])
     except Exception as e:
         print(f"[ERROR] set_name: Ошибка - {e}")
-        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении имени.")
+        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении имени. Проверьте интернет или повторите попытку.")
 
 @bot.message_handler(state=ProfileStates.waiting_for_address)
 def set_address(message):
     user_id = message.from_user.id
     print(f"[DEBUG] set_address: Получено сообщение от {user_id}, текст: {message.text}")
     try:
-        # Проверяем, существует ли пользователь
         if not db.user_exists(user_id):
             print(f"[DEBUG] set_address: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
-        # Обновляем адрес
         db.update_address(user_id, message.text)
         user_data = db.get_user(user_id)
         print(f"[DEBUG] set_address: Данные после обновления: {user_data}")
 
-        # Удаляем состояние
         bot.delete_state(user_id, message.chat.id)
-
-        # Отправляем подтверждение
         loc = load_locale(user_data["lang"])
         bot.send_message(message.chat.id, loc["address_updated"])
     except Exception as e:
         print(f"[ERROR] set_address: Ошибка - {e}")
-        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении адреса.")
+        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении адреса. Проверьте интернет или повторите попытку.")
 
 if __name__ == "__main__":
     try:

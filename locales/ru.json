@@ -20,5 +20,11 @@
   "instruction_text": "Инструкция недоступна",
   "register": "Регистрация",
   "registration_success": "Вы успешно зарегистрированы!",
-  "already_registered": "Вы уже зарегистрированы."
+  "already_registered": "Вы уже зарегистрированы.",
+  "my_profile": "Мой профиль",
+  "profile_info": "Ваш профиль",
+  "your_name": "Ваше имя",
+  "your_language": "Ваш язык",
+  "no_name": "Имя не указано",
+  "back": "Назад"
 }
