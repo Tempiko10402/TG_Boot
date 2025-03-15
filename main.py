@@ -2,18 +2,12 @@ import os
 import json
 import telebot
 from telebot import types
-from telebot.handler_backends import StatesGroup, State
 from dotenv import load_dotenv
 from database import Database
 
 load_dotenv()
 bot = telebot.TeleBot(os.getenv("BOT_TOKEN"))
 db = Database()
-
-# Состояния для FSM
-class ProfileStates(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_address = State()
 
 # Загрузка локализаций
 def load_locale(lang: str) -> dict:
@@ -116,14 +110,14 @@ def callback_handler(call):
             bot.send_message(call.message.chat.id, loc["edit_profile"], reply_markup=keyboard)
 
         elif data == "set_name":
-            bot.set_state(user_id, ProfileStates.waiting_for_name, call.message.chat.id)
-            print(f"[DEBUG] Set name state set for {user_id}")
-            bot.send_message(call.message.chat.id, loc["enter_name"])
+            print(f"[DEBUG] Requesting name for user_id {user_id}")
+            msg = bot.send_message(call.message.chat.id, loc["enter_name"])
+            bot.register_next_step_handler(msg, handle_name_input)
 
         elif data == "set_address":
-            bot.set_state(user_id, ProfileStates.waiting_for_address, call.message.chat.id)
-            print(f"[DEBUG] Set address state set for {user_id}")
-            bot.send_message(call.message.chat.id, loc["enter_address"])
+            print(f"[DEBUG] Requesting address for user_id {user_id}")
+            msg = bot.send_message(call.message.chat.id, loc["enter_address"])
+            bot.register_next_step_handler(msg, handle_address_input)
 
         elif data == "change_lang":
             print(f"[DEBUG] Change language button pressed for {user_id}")
@@ -185,45 +179,47 @@ def callback_handler(call):
         print(f"[ERROR] Callback handler error: {e}")
         bot.answer_callback_query(call.id, "⚠️ Произошла ошибка.")
 
-@bot.message_handler(state=ProfileStates.waiting_for_name)
-def set_name(message):
+def handle_name_input(message):
     user_id = message.from_user.id
-    print(f"[DEBUG] set_name: Получено сообщение от {user_id}, текст: {message.text}")
+    print(f"[DEBUG] handle_name_input: Получено сообщение от {user_id}, текст: {message.text}")
     try:
         if not db.user_exists(user_id):
-            print(f"[DEBUG] set_name: Пользователь {user_id} не найден, регистрируем...")
+            print(f"[DEBUG] handle_name_input: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
         db.update_name(user_id, message.text)
         user_data = db.get_user(user_id)
-        print(f"[DEBUG] set_name: Данные после обновления: {user_data}")
+        print(f"[DEBUG] handle_name_input: Данные после обновления: {user_data}")
 
-        bot.delete_state(user_id, message.chat.id)
         loc = load_locale(user_data["lang"])
         bot.send_message(message.chat.id, loc["name_updated"])
     except Exception as e:
-        print(f"[ERROR] set_name: Ошибка - {e}")
+        print(f"[ERROR] handle_name_input: Ошибка - {e}")
         bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении имени. Проверьте интернет или повторите попытку.")
 
-@bot.message_handler(state=ProfileStates.waiting_for_address)
-def set_address(message):
+def handle_address_input(message):
     user_id = message.from_user.id
-    print(f"[DEBUG] set_address: Получено сообщение от {user_id}, текст: {message.text}")
+    print(f"[DEBUG] handle_address_input: Получено сообщение от {user_id}, текст: {message.text}")
     try:
         if not db.user_exists(user_id):
-            print(f"[DEBUG] set_address: Пользователь {user_id} не найден, регистрируем...")
+            print(f"[DEBUG] handle_address_input: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
         db.update_address(user_id, message.text)
         user_data = db.get_user(user_id)
-        print(f"[DEBUG] set_address: Данные после обновления: {user_data}")
+        print(f"[DEBUG] handle_address_input: Данные после обновления: {user_data}")
 
-        bot.delete_state(user_id, message.chat.id)
         loc = load_locale(user_data["lang"])
         bot.send_message(message.chat.id, loc["address_updated"])
     except Exception as e:
-        print(f"[ERROR] set_address: Ошибка - {e}")
+        print(f"[ERROR] handle_address_input: Ошибка - {e}")
         bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении адреса. Проверьте интернет или повторите попытку.")
+
+@bot.message_handler(content_types=['text'])
+def debug_text_handler(message):
+    user_id = message.from_user.id
+    print(f"[DEBUG] Text message received: user_id={user_id}, text={message.text}")
+    bot.send_message(message.chat.id, "⚠️ Пожалуйста, выберите действие из меню.")
 
 if __name__ == "__main__":
     try:
