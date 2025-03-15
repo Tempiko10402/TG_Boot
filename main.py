@@ -34,39 +34,38 @@ def get_main_kb(locale: dict):
         types.InlineKeyboardButton(locale["address"], callback_data="show_address"),
     )
     keyboard.row(
+        types.InlineKeyboardButton(locale.get("register", "Регистрация"), callback_data="register"),
         types.InlineKeyboardButton(locale["support"], url="https://t.me/username"),
         types.InlineKeyboardButton(locale["instruction"], callback_data="instruction"),
     )
     return keyboard
-    
+
 def get_lang_kb():
     keyboard = types.InlineKeyboardMarkup()
     keyboard.row(
         types.InlineKeyboardButton("Русский 🇷🇺", callback_data="lang_ru"),
         types.InlineKeyboardButton("Кыргызский 🇰🇬", callback_data="lang_kg"),
     )
+    print(f"[DEBUG] get_lang_kb: Клавиатура языков создана")
     return keyboard
 
 # Обработчики
 @bot.message_handler(commands=["start"])
 def start_handler(message: types.Message):
     user_id = message.from_user.id
+    print(f"[DEBUG] Start handler for user_id {user_id}")
     try:
         if not db.user_exists(user_id):
-            # Регистрация нового пользователя
             db.add_user(user_id)
-            db.update_lang(user_id, "ru")  # Язык по умолчанию
-            print(f"Новый пользователь зарегистрирован: {user_id}")
+            print(f"[DEBUG] Новый пользователь зарегистрирован: {user_id}")
 
-        # Загрузка данных пользователя
         user_data = db.get_user(user_id)
         if not user_data:
-            raise Exception("Пользователь не найден в базе")
+            raise Exception(f"Данные пользователя {user_id} не найдены в базе")
 
         lang = user_data["lang"]
         loc = load_locale(lang)
 
-        # Отправка приветственного сообщения
         text = loc.get("welcome", "Добро пожаловать!") + "\n\n"
         text += loc.get("help", "Используйте кнопки ниже:")
         
@@ -77,64 +76,138 @@ def start_handler(message: types.Message):
         )
         
     except Exception as e:
-        print(f"Ошибка в /start: {e}")
+        import traceback
+        print(f"[ERROR] Start handler error for user_id {user_id}: {e}\n{traceback.format_exc()}")
         bot.send_message(message.chat.id, "⚠️ Произошла ошибка. Попробуйте позже.")
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = call.from_user.id
     data = call.data
+    print(f"[DEBUG] Callback: user_id={user_id}, data={data}")
     user = db.get_user(user_id)
-    loc = load_locale(user["lang"])
+    loc = load_locale(user["lang"] if user else "ru")  # Загружаем локализацию по умолчанию, если пользователь не найден
 
-    if data == "edit_profile":
-        keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton(loc["change_name"], callback_data="set_name"))
-        keyboard.add(types.InlineKeyboardButton(loc["change_address"], callback_data="set_address"))
-        bot.send_message(call.message.chat.id, loc["edit_profile"], reply_markup=keyboard)
+    try:
+        if data == "edit_profile":
+            keyboard = types.InlineKeyboardMarkup()
+            keyboard.add(types.InlineKeyboardButton(loc["change_name"], callback_data="set_name"))
+            keyboard.add(types.InlineKeyboardButton(loc["change_address"], callback_data="set_address"))
+            bot.send_message(call.message.chat.id, loc["edit_profile"], reply_markup=keyboard)
 
-    elif data == "set_name":
-        bot.set_state(user_id, ProfileStates.waiting_for_name, call.message.chat.id)
-        bot.send_message(call.message.chat.id, loc["enter_name"])
+        elif data == "set_name":
+            bot.set_state(user_id, ProfileStates.waiting_for_name, call.message.chat.id)
+            print(f"[DEBUG] Set name state set for {user_id}")
+            bot.send_message(call.message.chat.id, loc["enter_name"])
 
-    elif data == "set_address":
-        bot.set_state(user_id, ProfileStates.waiting_for_address, call.message.chat.id)
-        bot.send_message(call.message.chat.id, loc["enter_address"])
+        elif data == "set_address":
+            bot.set_state(user_id, ProfileStates.waiting_for_address, call.message.chat.id)
+            print(f"[DEBUG] Set address state set for {user_id}")
+            bot.send_message(call.message.chat.id, loc["enter_address"])
 
-    elif data == "show_address":
-        address = "AP-1805\n18727306620\n浙江省金华市义乌市北苑街道凌云八区59栋3单元AP-1805 门面仓库 AP-1805"
-        bot.send_message(call.message.chat.id, f"**Нажмите чтобы скопировать:**\n\n`{address}`", parse_mode="Markdown")
+        elif data == "change_lang":
+            print(f"[DEBUG] Change language button pressed for {user_id}")
+            bot.send_message(call.message.chat.id, loc.get("select_lang", "Выберите язык:"), reply_markup=get_lang_kb())
 
-    elif data == "instruction":
-        bot.send_message(call.message.chat.id, loc["instruction_text"])
+        elif data == "show_address":
+            print(f"[DEBUG] Show address button pressed for {user_id}")
+            if not user:
+                bot.send_message(call.message.chat.id, "⚠️ Сначала зарегистрируйтесь.")
+                return
+            address = user.get("address", loc.get("no_address", "Адрес не указан"))
+            your_address_text = loc.get("your_address", "Ваш адрес")
+            bot.send_message(
+                call.message.chat.id,
+                f"**{your_address_text}:**\n\n`{address}`",
+                parse_mode="Markdown"
+            )
 
-    elif data.startswith("lang_"):
-        new_lang = data.split("_")[1]
-        db.update_lang(user_id, new_lang)
-        loc = load_locale(new_lang)
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=loc["lang_changed"],
-            reply_markup=get_main_kb(loc)
-        )
+        elif data == "instruction":
+            bot.send_message(call.message.chat.id, loc.get("instruction_text", "Инструкция недоступна"))
 
-    else:
-        bot.answer_callback_query(call.id, "⚠️ Эта функция в разработке")
+        elif data == "register":
+            print(f"[DEBUG] Register button pressed for {user_id}")
+            if not db.user_exists(user_id):
+                db.add_user(user_id)
+                print(f"[DEBUG] Пользователь {user_id} зарегистрирован")
+                bot.send_message(call.message.chat.id, loc.get("registration_success", "Вы успешно зарегистрированы!"))
+            else:
+                bot.send_message(call.message.chat.id, loc.get("already_registered", "Вы уже зарегистрированы."))
+            user_data = db.get_user(user_id)
+            loc = load_locale(user_data["lang"] if user_data else "ru")
+            bot.send_message(call.message.chat.id, loc.get("help", "Используйте кнопки ниже:"), reply_markup=get_main_kb(loc))
+
+        elif data.startswith("lang_"):
+            new_lang = data.split("_")[1]
+            db.update_lang(user_id, new_lang)
+            loc = load_locale(new_lang)
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=loc["lang_changed"],
+                reply_markup=get_main_kb(loc)
+            )
+
+        else:
+            bot.answer_callback_query(call.id, "⚠️ Эта функция в разработке")
+    except Exception as e:
+        print(f"[ERROR] Callback handler error: {e}")
+        bot.answer_callback_query(call.id, "⚠️ Произошла ошибка.")
+
 @bot.message_handler(state=ProfileStates.waiting_for_name)
 def set_name(message):
     user_id = message.from_user.id
-    db.update_name(user_id, message.text)
-    bot.delete_state(user_id, message.chat.id)
-    loc = load_locale(db.get_user(user_id)["lang"])
-    bot.send_message(message.chat.id, loc["name_updated"])
+    print(f"[DEBUG] set_name: Получено сообщение от {user_id}, текст: {message.text}")
+    try:
+        # Проверяем, существует ли пользователь
+        if not db.user_exists(user_id):
+            print(f"[DEBUG] set_name: Пользователь {user_id} не найден, регистрируем...")
+            db.add_user(user_id)
+
+        # Обновляем имя
+        db.update_name(user_id, message.text)
+        user_data = db.get_user(user_id)
+        print(f"[DEBUG] set_name: Данные после обновления: {user_data}")
+
+        # Удаляем состояние
+        bot.delete_state(user_id, message.chat.id)
+
+        # Отправляем подтверждение
+        loc = load_locale(user_data["lang"])
+        bot.send_message(message.chat.id, loc["name_updated"])
+    except Exception as e:
+        print(f"[ERROR] set_name: Ошибка - {e}")
+        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении имени.")
 
 @bot.message_handler(state=ProfileStates.waiting_for_address)
 def set_address(message):
     user_id = message.from_user.id
-    db.update_address(user_id, message.text)
-    bot.delete_state(user_id, message.chat.id)
-    loc = load_locale(db.get_user(user_id)["lang"])
-    bot.send_message(message.chat.id, loc["address_updated"])
+    print(f"[DEBUG] set_address: Получено сообщение от {user_id}, текст: {message.text}")
+    try:
+        # Проверяем, существует ли пользователь
+        if not db.user_exists(user_id):
+            print(f"[DEBUG] set_address: Пользователь {user_id} не найден, регистрируем...")
+            db.add_user(user_id)
+
+        # Обновляем адрес
+        db.update_address(user_id, message.text)
+        user_data = db.get_user(user_id)
+        print(f"[DEBUG] set_address: Данные после обновления: {user_data}")
+
+        # Удаляем состояние
+        bot.delete_state(user_id, message.chat.id)
+
+        # Отправляем подтверждение
+        loc = load_locale(user_data["lang"])
+        bot.send_message(message.chat.id, loc["address_updated"])
+    except Exception as e:
+        print(f"[ERROR] set_address: Ошибка - {e}")
+        bot.send_message(message.chat.id, "⚠️ Произошла ошибка при обновлении адреса.")
 
 if __name__ == "__main__":
-    bot.polling(none_stop=True)
+    try:
+        bot.polling(none_stop=True, interval=5, timeout=30)
+    except Exception as e:
+        print(f"[ERROR] Polling error: {e}")
+    finally:
+        db.close()
