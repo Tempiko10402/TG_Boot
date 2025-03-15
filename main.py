@@ -100,7 +100,7 @@ BANK_REQUISITES = {
         "image_path": "requisites/mbank.jpg"
     },
     "pay_obank": {
-        "name": "O!Bank (Optima Bank)",
+        "name": "O!Bank (О деньги)",
         "image_path": "requisites/obank.jpg"
     },
     "pay_sber": {
@@ -111,10 +111,7 @@ BANK_REQUISITES = {
         "name": "Тинькофф (Mir)",
         "image_path": "requisites/tinkoff.jpg"
     },
-    "pay_vtb": {
-        "name": "ВТБ (Mir)",
-        "image_path": "requisites/vtb.jpg"
-    }
+    
 }
 
 # Обработчики
@@ -248,9 +245,10 @@ def callback_handler(call):
             try:
                 with open(image_path, "rb") as photo:
                     bot.send_photo(call.message.chat.id, photo=photo, caption=f"Реквизиты для оплаты через {bank_name}")
+                    bot.send_message(call.message.chat.id, f"Eсли хотите оплатить через номер: +99600000000 ")
             except FileNotFoundError:
                 bot.send_message(call.message.chat.id, f"⚠️ Изображение с реквизитами для {bank_name} не найдено. Пожалуйста, обратитесь в поддержку.")
-            
+
             bot.send_message(call.message.chat.id, loc.get("back_to_main", "Назад в главное меню"), reply_markup=get_main_kb(loc))
 
         else:
