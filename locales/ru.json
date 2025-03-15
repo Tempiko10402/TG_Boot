@@ -26,5 +26,7 @@
   "your_name": "Ваше имя",
   "your_language": "Ваш язык",
   "no_name": "Имя не указано",
-  "back": "Назад"
+  "back": "Назад",
+  "pay": "Оплатить",
+  "select_payment_method": "Выберите способ оплаты:"
 }
