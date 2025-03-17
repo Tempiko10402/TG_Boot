@@ -26,6 +26,7 @@ def get_main_kb(locale: dict):
     )
     keyboard.row(
         types.InlineKeyboardButton(locale["address"], callback_data="show_address"),
+        types.InlineKeyboardButton(locale.get("my_history", "Моя история"), callback_data="my_history"),
     )
     keyboard.row(
         types.InlineKeyboardButton(locale.get("register", "Регистрация"), callback_data="register"),
@@ -40,6 +41,7 @@ def get_profile_menu(locale: dict):
     keyboard.row(
         types.InlineKeyboardButton(locale["profile"], callback_data="edit_profile"),
         types.InlineKeyboardButton(locale.get("pay", "Оплатить"), callback_data="pay"),
+        types.InlineKeyboardButton(locale.get("my_history", "Моя история"), callback_data="my_history"),
     )
     keyboard.row(
         types.InlineKeyboardButton(locale.get("back", "Назад"), callback_data="back_to_main"),
@@ -63,10 +65,10 @@ def get_payment_kb(locale: dict):
     keyboard.row(types.InlineKeyboardButton("Bakai Bank", callback_data="pay_bakai"))
     keyboard.row(types.InlineKeyboardButton("MBank", callback_data="pay_mbank"))
     keyboard.row(types.InlineKeyboardButton("O!Bank (О деньги)", callback_data="pay_obank"))
+    keyboard.row(types.InlineKeyboardButton("Optima Bank", callback_data="pay_odeneg"))
     # Российские банки и Mir
     keyboard.row(types.InlineKeyboardButton("Сбербанк (Mir)", callback_data="pay_sber"))
     keyboard.row(types.InlineKeyboardButton("Тинькофф (Mir)", callback_data="pay_tinkoff"))
-    keyboard.row(types.InlineKeyboardButton("ВТБ (Mir)", callback_data="pay_vtb"))
     keyboard.row(types.InlineKeyboardButton(locale.get("back", "Назад"), callback_data="back_to_main"))
     return keyboard
 
@@ -100,8 +102,12 @@ BANK_REQUISITES = {
         "image_path": "requisites/mbank.jpg"
     },
     "pay_obank": {
-        "name": "O!Bank (О деньги)",
+        "name": "O!Bank (O деньги)",
         "image_path": "requisites/obank.jpg"
+    },
+    "pay_odeneg": {
+        "name": "Optima Bank",
+        "image_path": "requisites/optimabank.jpg"
     },
     "pay_sber": {
         "name": "Сбербанк (Mir)",
@@ -111,7 +117,7 @@ BANK_REQUISITES = {
         "name": "Тинькофф (Mir)",
         "image_path": "requisites/tinkoff.jpg"
     },
-    
+  
 }
 
 # Обработчики
@@ -227,35 +233,72 @@ def callback_handler(call):
             print(f"[DEBUG] Pay button pressed for user_id {user_id}")
             bot.send_message(call.message.chat.id, loc.get("select_payment_method", "Выберите способ оплаты:"), reply_markup=get_payment_kb(loc))
 
-        elif data in ["pay_aiyl", "pay_rsk", "pay_bakai", "pay_mbank", "pay_obank", "pay_sber", "pay_tinkoff", "pay_vtb"]:
+        elif data == "my_history":
+            print(f"[DEBUG] My history button pressed for {user_id}")
+            if not user:
+                bot.send_message(call.message.chat.id, "⚠️ Сначала зарегистрируйтесь.")
+                return
+            transactions = db.get_transactions(user_id)
+            if not transactions:
+                bot.send_message(call.message.chat.id, loc.get("no_transactions", "У вас нет транзакций."))
+            else:
+                history_text = f"**{loc.get('transaction_history', 'Ваша история транзакций')}:**\n\n"
+                for trans in transactions:
+                    bank, amount, date = trans
+                    history_text += f"- {loc.get('bank', 'Банк')}: {bank}, {loc.get('amount', 'Сумма')}: {amount} KGS, {loc.get('date', 'Дата')}: {date}\n"
+                bot.send_message(call.message.chat.id, history_text, parse_mode="Markdown", reply_markup=get_profile_menu(loc))
+
+        elif data in ["pay_aiyl", "pay_rsk", "pay_bakai", "pay_mbank", "pay_obank", "pay_odeneg", "pay_sber", "pay_tinkoff", "pay_vtb"]:
             bank_info = BANK_REQUISITES[data]
             bank_name = bank_info["name"]
             image_path = bank_info["image_path"]
             
-            # Сообщение с инструкцией
-            if "Mir" in bank_name or data == "pay_mbank":
-                warning = ("⚠️ Оплата через {bank} возможна, но из-за санкций некоторые банки в Кыргызстане могут ограничивать поддержку Mir и переводы через российские банки (Сбербанк, Тинькофф, ВТБ). "
-                          "Используйте приложение банка для оплаты.")
-                bot.send_message(call.message.chat.id, warning.format(bank=bank_name))
-            else:
-                instruction = f"Оплата через {bank_name}. Откройте приложение {bank_name} или посетите ближайшее отделение для завершения транзакции."
-                bot.send_message(call.message.chat.id, instruction)
-
-            # Отправка фото с реквизитами
-            try:
-                with open(image_path, "rb") as photo:
-                    bot.send_photo(call.message.chat.id, photo=photo, caption=f"Реквизиты для оплаты через {bank_name}")
-                    bot.send_message(call.message.chat.id, f"Eсли хотите оплатить через номер: +99600000000 ")
-            except FileNotFoundError:
-                bot.send_message(call.message.chat.id, f"⚠️ Изображение с реквизитами для {bank_name} не найдено. Пожалуйста, обратитесь в поддержку.")
-
-            bot.send_message(call.message.chat.id, loc.get("back_to_main", "Назад в главное меню"), reply_markup=get_main_kb(loc))
+            # Запрос суммы оплаты
+            msg = bot.send_message(call.message.chat.id, loc.get("enter_amount", "Введите сумму оплаты (в KGS):"))
+            bot.register_next_step_handler(msg, lambda m: handle_payment(m, data, bank_info))
 
         else:
             bot.answer_callback_query(call.id, "⚠️ Эта функция в разработке")
     except Exception as e:
         print(f"[ERROR] Callback handler error: {e}")
         bot.answer_callback_query(call.id, "⚠️ Произошла ошибка.")
+
+def handle_payment(message, data, bank_info):
+    user_id = message.from_user.id
+    try:
+        amount = float(message.text)
+        if amount <= 0:
+            bot.send_message(user_id, "⚠️ Сумма должна быть положительной. Попробуйте снова.")
+            return
+
+        bank_name = bank_info["name"]
+        image_path = bank_info["image_path"]
+
+        # Сохранение транзакции
+        db.add_transaction(user_id, bank_name, amount)
+
+        # Сообщение с инструкцией
+        if "Mir" in bank_name or data == "pay_mbank":
+            warning = ("⚠️ Оплата через {bank} возможна, но из-за санкций некоторые банки в Кыргызстане могут ограничивать поддержку Mir и переводы через российские банки (Сбербанк, Тинькофф, ВТБ). "
+                      "Используйте приложение банка для оплаты.")
+            bot.send_message(user_id, warning.format(bank=bank_name))
+        else:
+            instruction = f"Оплата через {bank_name} на сумму {amount} KGS. Откройте приложение {bank_name} или посетите ближайшее отделение для завершения транзакции."
+            bot.send_message(user_id, instruction)
+
+        # Отправка фото с реквизитами
+        try:
+            with open(image_path, "rb") as photo:
+                bot.send_photo(user_id, photo=photo, caption=f"Реквизиты для оплаты через {bank_name} на сумму {amount} KGS")
+        except FileNotFoundError:
+            bot.send_message(user_id, f"⚠️ Изображение с реквизитами для {bank_name} не найдено. Пожалуйста, обратитесь в поддержку.")
+
+        bot.send_message(user_id, "Назад в главное меню", reply_markup=get_main_kb(load_locale(db.get_user(user_id)["lang"])))
+    except ValueError:
+        bot.send_message(user_id, "⚠️ Введите корректную сумму (например, 100.50).")
+    except Exception as e:
+        print(f"[ERROR] handle_payment error: {e}")
+        bot.send_message(user_id, "⚠️ Произошла ошибка при обработке оплаты.")
 
 def handle_name_input(message):
     user_id = message.from_user.id
