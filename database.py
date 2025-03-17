@@ -204,7 +204,7 @@ class Database:
             conn.close()
             return True
 
-        if request_count >= 15:
+        if request_count >= 30:
             conn.close()
             return False
 
