@@ -60,8 +60,6 @@
     "error_image_not_found": "⚠️ Image with requisites for {bank} not found. Please contact support.",
     "not_registered": "⚠️ Please register first.",
     "feature_in_development": "⚠️ This feature is under development.",
-    "news": "News",
-    "error_news": "⚠️ Unable to load news. Please try again later.",
     "faq": "Frequently Asked Questions",
     "faq_how_to_pay": "How to pay?",
     "faq_how_to_pay_answer": "Press 'Pay', select a bank, enter the amount, and follow the instructions.",

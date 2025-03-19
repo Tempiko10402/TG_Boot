@@ -6,15 +6,28 @@ from dotenv import load_dotenv
 from database import Database
 import re
 import time
-import feedparser
 import requests
 from datetime import datetime
+import logging
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('log.txt', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
 load_dotenv()
 bot = telebot.TeleBot(os.getenv("BOT_TOKEN"))
 db = Database()
 
-# ID администратора (замените на ваш Telegram ID)
+# ID администратора
 ADMIN_ID = 1406374607  # Укажите ваш Telegram ID
 
 # Загрузка локализаций
@@ -23,6 +36,7 @@ def load_locale(lang: str) -> dict:
         with open(f"locales/{lang}.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
+        logging.error(f"Locale file for {lang} not found, falling back to 'ru'")
         return load_locale("ru")
 
 # Валидация ввода
@@ -44,8 +58,7 @@ def get_main_kb(locale: dict):
         types.InlineKeyboardButton(locale["my_history"], callback_data="my_history"),
     )
     keyboard.row(
-        types.InlineKeyboardButton(locale["news"], callback_data="news"),
-        types.InlineKeyboardButton(locale["faq"], callback_data="faq"),
+        types.InlineKeyboardButton(locale["faq"], callback_data="faq"),  # Добавляем кнопку FAQ
     )
     keyboard.row(
         types.InlineKeyboardButton(locale["register"], callback_data="register"),
@@ -74,12 +87,11 @@ def get_lang_kb():
         types.InlineKeyboardButton("Кыргызский 🇰🇬", callback_data="lang_kg"),
         types.InlineKeyboardButton("English 🇬🇧", callback_data="lang_en"),
     )
-    print("[DEBUG] get_lang_kb: Клавиатура языков создана")
+    logging.debug("get_lang_kb: Клавиатура языков создана")
     return keyboard
 
 def get_payment_kb(locale: dict, user_address: str):
     keyboard = types.InlineKeyboardMarkup()
-    # Приоритет для банков в зависимости от региона
     if "Бишкек" in user_address:
         keyboard.row(
             types.InlineKeyboardButton("MBank", callback_data="pay_mbank"),
@@ -92,7 +104,6 @@ def get_payment_kb(locale: dict, user_address: str):
             types.InlineKeyboardButton("RSK Bank", callback_data="pay_rsk"),
             types.InlineKeyboardButton("Bakai Bank", callback_data="pay_bakai"),
         )
-    # Остальные банки
     if "Бишкек" not in user_address:
         keyboard.row(
             types.InlineKeyboardButton("MBank", callback_data="pay_mbank"),
@@ -141,7 +152,7 @@ def get_profile_info(user_data: dict, loc: dict) -> str:
         f"🌐 {loc.get('your_language', 'Ваш язык')}: `{lang}`"
     )
 
-# Реквизиты для банков (локальные пути к файлам)
+# Реквизиты для банков
 BANK_REQUISITES = {
     "pay_aiyl": {
         "name": "Aiyl Bank",
@@ -164,7 +175,7 @@ BANK_REQUISITES = {
         "location": "https://www.google.com/maps/search/MBank+branches+Bishkek/"
     },
     "pay_obank": {
-        "name": "O!Bank (O деньги)",
+        "name": "O!Bank",
         "image_path": "requisites/obank.jpg",
         "location": "https://www.google.com/maps/search/O!Bank+branches+Bishkek/"
     },
@@ -185,6 +196,49 @@ BANK_REQUISITES = {
     },
 }
 
+# Генерация PDF-отчёта
+def generate_pdf_report():
+    filename = "report.pdf"
+    c = canvas.Canvas(filename, pagesize=letter)
+    width, height = letter
+    c.setFont("Helvetica", 12)
+
+    # Заголовок
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(100, height - 50, "Bot Usage Report")
+    c.setFont("Helvetica", 12)
+    c.drawString(100, height - 70, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Пользователи
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(100, height - 100, "Users")
+    y = height - 120
+    users = db.get_all_users()
+    for user in users:
+        if y < 50:
+            c.showPage()
+            y = height - 50
+        text = f"ID: {user['user_id']}, Name: {user['name']}, Address: {user['address']}"
+        c.drawString(100, y, text)
+        y -= 20
+
+    # Транзакции
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(100, y - 20, "Transactions")
+    y -= 40
+    transactions = db.get_all_transactions()
+    for trans in transactions:
+        if y < 50:
+            c.showPage()
+            y = height - 50
+        trans_id, user_id, bank, amount, date = trans
+        text = f"ID: {trans_id}, User ID: {user_id}, Bank: {bank}, Amount: {amount} KGS, Date: {date}"
+        c.drawString(100, y, text)
+        y -= 20
+
+    c.save()
+    return filename
+
 # Обработчики
 @bot.message_handler(commands=["start"])
 def start_handler(message: types.Message):
@@ -192,11 +246,11 @@ def start_handler(message: types.Message):
     if not db.check_request_limit(user_id):
         bot.send_message(user_id, "⚠️ Слишком много запросов. Пожалуйста, подождите минуту.")
         return
-    print(f"[DEBUG] Start handler for user_id {user_id}")
+    logging.debug(f"Start handler for user_id {user_id}")
     try:
         if not db.user_exists(user_id):
             db.add_user(user_id)
-            print(f"[DEBUG] Новый пользователь зарегистрирован: {user_id}")
+            logging.info(f"Новый пользователь зарегистрирован: {user_id}")
 
         user_data = db.get_user(user_id)
         if not user_data:
@@ -214,8 +268,7 @@ def start_handler(message: types.Message):
             reply_markup=get_main_kb(loc)
         )
     except Exception as e:
-        import traceback
-        print(f"[ERROR] Start handler error for user_id {user_id}: {e}\n{traceback.format_exc()}")
+        logging.error(f"Start handler error for user_id {user_id}: {e}", exc_info=True)
         bot.send_message(message.chat.id, loc.get("error_generic", "⚠️ Произошла ошибка. Попробуйте позже."))
 
 @bot.message_handler(commands=["stats"])
@@ -224,6 +277,7 @@ def stats_handler(message: types.Message):
     if user_id != ADMIN_ID:
         bot.send_message(user_id, "⚠️ Эта команда доступна только администратору.")
         return
+    logging.info(f"Stats requested by admin {user_id}")
     stats = db.get_bank_stats()
     if not stats:
         bot.send_message(user_id, "Нет данных о статистике.")
@@ -233,6 +287,24 @@ def stats_handler(message: types.Message):
         stats_text += f"- {bank}: {count} раз(а)\n"
     bot.send_message(user_id, stats_text, parse_mode="Markdown")
 
+@bot.message_handler(commands=["report"])
+def report_handler(message: types.Message):
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID:
+        bot.send_message(user_id, "⚠️ Эта команда доступна только администратору.")
+        return
+    logging.info(f"Report requested by admin {user_id}")
+    try:
+        bot.send_message(user_id, "Генерация отчёта...")
+        filename = generate_pdf_report()
+        with open(filename, "rb") as f:
+            bot.send_document(user_id, f, caption="Отчёт по пользователям и транзакциям")
+        os.remove(filename)
+        logging.info("PDF report sent successfully")
+    except Exception as e:
+        logging.error(f"Error generating PDF report: {e}", exc_info=True)
+        bot.send_message(user_id, "⚠️ Ошибка при генерации отчёта.")
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = call.from_user.id
@@ -240,7 +312,7 @@ def callback_handler(call):
     if not db.check_request_limit(user_id):
         bot.send_message(user_id, "⚠️ Слишком много запросов. Пожалуйста, подождите минуту.")
         return
-    print(f"[DEBUG] Callback: user_id={user_id}, data={data}")
+    logging.debug(f"Callback: user_id={user_id}, data={data}")
     user = db.get_user(user_id)
     loc = load_locale(user["lang"] if user else "ru")
 
@@ -252,21 +324,21 @@ def callback_handler(call):
             bot.send_message(call.message.chat.id, loc["edit_profile"], reply_markup=keyboard)
 
         elif data == "set_name":
-            print(f"[DEBUG] Requesting name for user_id {user_id}")
+            logging.debug(f"Requesting name for user_id {user_id}")
             msg = bot.send_message(call.message.chat.id, loc["enter_name"])
             bot.register_next_step_handler(msg, handle_name_input)
 
         elif data == "set_address":
-            print(f"[DEBUG] Requesting address for user_id {user_id}")
+            logging.debug(f"Requesting address for user_id {user_id}")
             msg = bot.send_message(call.message.chat.id, loc["enter_address"])
             bot.register_next_step_handler(msg, handle_address_input)
 
         elif data == "change_lang":
-            print(f"[DEBUG] Change language button pressed for {user_id}")
+            logging.debug(f"Change language button pressed for {user_id}")
             bot.send_message(call.message.chat.id, loc["select_lang"], reply_markup=get_lang_kb())
 
         elif data == "show_address":
-            print(f"[DEBUG] Show address button pressed for {user_id}")
+            logging.debug(f"Show address button pressed for {user_id}")
             if not user:
                 bot.send_message(call.message.chat.id, loc["not_registered"])
                 return
@@ -279,7 +351,7 @@ def callback_handler(call):
             )
 
         elif data == "my_profile":
-            print(f"[DEBUG] My profile button pressed for {user_id}")
+            logging.debug(f"My profile button pressed for {user_id}")
             if not user:
                 bot.send_message(call.message.chat.id, loc["not_registered"])
                 return
@@ -293,10 +365,10 @@ def callback_handler(call):
             bot.send_message(call.message.chat.id, loc["instruction_text"])
 
         elif data == "register":
-            print(f"[DEBUG] Register button pressed for {user_id}")
+            logging.debug(f"Register button pressed for {user_id}")
             if not db.user_exists(user_id):
                 db.add_user(user_id)
-                print(f"[DEBUG] Пользователь {user_id} зарегистрирован")
+                logging.info(f"Пользователь {user_id} зарегистрирован")
                 bot.send_message(call.message.chat.id, loc["registration_success"])
             else:
                 bot.send_message(call.message.chat.id, loc["already_registered"])
@@ -316,12 +388,12 @@ def callback_handler(call):
             )
 
         elif data == "pay":
-            print(f"[DEBUG] Pay button pressed for user_id {user_id}")
+            logging.debug(f"Pay button pressed for user_id {user_id}")
             user_data = db.get_user(user_id)
             bot.send_message(call.message.chat.id, loc["select_payment_method"], reply_markup=get_payment_kb(loc, user_data["address"]))
 
         elif data == "my_history":
-            print(f"[DEBUG] My history button pressed for {user_id}")
+            logging.debug(f"My history button pressed for {user_id}")
             if not user:
                 bot.send_message(call.message.chat.id, loc["not_registered"])
                 return
@@ -334,19 +406,6 @@ def callback_handler(call):
                     bank, amount, date = trans
                     history_text += f"- {loc['bank']}: {bank}, {loc['amount']}: {amount} KGS, {loc['date']}: {date}\n"
                 bot.send_message(call.message.chat.id, history_text, parse_mode="Markdown", reply_markup=get_profile_menu(loc))
-
-        elif data == "news":
-            bot.send_message(call.message.chat.id, loc["processing"])
-            # Парсим новости (например, курс валют от NBKR)
-            try:
-                feed = feedparser.parse("https://www.nbkr.kg/XML/daily.xml")  # RSS-лента Национального банка Кыргызстана
-                news_text = f"**{loc['news']}:**\n\n"
-                for entry in feed.entries[:3]:
-                    news_text += f"- {entry.title}: {entry.summary}\n"
-                bot.send_message(call.message.chat.id, news_text, parse_mode="Markdown")
-            except Exception as e:
-                print(f"[ERROR] News parsing error: {e}")
-                bot.send_message(call.message.chat.id, loc["error_news"])
 
         elif data == "faq":
             faq_text = f"**{loc['faq']}:**\n\n"
@@ -406,12 +465,10 @@ def callback_handler(call):
                 image_path = bank_info["image_path"]
                 location_url = bank_info["location"]
 
-                # Сохранение транзакции
                 transaction_id = db.add_transaction(user_id, bank_name, amount)
 
-                # Сообщение с инструкцией
                 bot.send_message(call.message.chat.id, loc["processing"])
-                time.sleep(1)  # Имитация обработки
+                time.sleep(1)
                 if "Mir" in bank_name or bank_data == "pay_mbank":
                     warning = loc["payment_warning"].format(bank=bank_name)
                     bot.send_message(call.message.chat.id, warning)
@@ -419,19 +476,16 @@ def callback_handler(call):
                     instruction = loc["payment_instruction"].format(bank=bank_name, amount=amount)
                     bot.send_message(call.message.chat.id, instruction)
 
-                # Отправка фото с реквизитами
                 try:
                     with open(image_path, "rb") as photo:
                         bot.send_photo(user_id, photo=photo, caption=loc["requisites_caption"].format(bank=bank_name, amount=amount))
                 except FileNotFoundError:
                     bot.send_message(user_id, loc["error_image_not_found"].format(bank=bank_name))
 
-                # Кнопка для поиска отделения
                 location_kb = types.InlineKeyboardMarkup()
                 location_kb.add(types.InlineKeyboardButton(loc["find_branch"], url=location_url))
                 bot.send_message(user_id, loc["find_branch_prompt"], reply_markup=location_kb)
 
-                # Запрос квитанции
                 bot.send_message(user_id, loc["upload_receipt_prompt"], reply_markup=get_receipt_kb(loc, transaction_id))
             else:
                 bot.edit_message_text(
@@ -456,7 +510,7 @@ def callback_handler(call):
         else:
             bot.answer_callback_query(call.id, loc["feature_in_development"])
     except Exception as e:
-        print(f"[ERROR] Callback handler error: {e}")
+        logging.error(f"Callback handler error: {e}", exc_info=True)
         bot.answer_callback_query(call.id, loc["error_generic"])
 
 def handle_payment(message, data, bank_info):
@@ -473,7 +527,7 @@ def handle_payment(message, data, bank_info):
     except ValueError:
         bot.send_message(user_id, loc["error_invalid_amount"])
     except Exception as e:
-        print(f"[ERROR] handle_payment error: {e}")
+        logging.error(f"handle_payment error: {e}", exc_info=True)
         bot.send_message(user_id, loc["error_generic"])
 
 def handle_receipt_upload(message, transaction_id):
@@ -491,7 +545,7 @@ def handle_name_input(message):
     loc = load_locale(db.get_user(user_id)["lang"] if db.user_exists(user_id) else "ru")
     try:
         if not db.user_exists(user_id):
-            print(f"[DEBUG] handle_name_input: Пользователь {user_id} не найден, регистрируем...")
+            logging.debug(f"handle_name_input: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
         name = message.text.strip()
@@ -502,7 +556,7 @@ def handle_name_input(message):
         confirm_text = f"{loc['confirm_name']}: {name}"
         bot.send_message(user_id, confirm_text, reply_markup=get_confirm_kb(loc, "name"))
     except Exception as e:
-        print(f"[ERROR] handle_name_input: Ошибка - {e}")
+        logging.error(f"handle_name_input: Ошибка - {e}", exc_info=True)
         bot.send_message(user_id, loc["error_generic"])
 
 def handle_address_input(message):
@@ -510,7 +564,7 @@ def handle_address_input(message):
     loc = load_locale(db.get_user(user_id)["lang"] if db.user_exists(user_id) else "ru")
     try:
         if not db.user_exists(user_id):
-            print(f"[DEBUG] handle_address_input: Пользователь {user_id} не найден, регистрируем...")
+            logging.debug(f"handle_address_input: Пользователь {user_id} не найден, регистрируем...")
             db.add_user(user_id)
 
         address = message.text.strip()
@@ -521,19 +575,19 @@ def handle_address_input(message):
         confirm_text = f"{loc['confirm_address']}: {address}"
         bot.send_message(user_id, confirm_text, reply_markup=get_confirm_kb(loc, "address"))
     except Exception as e:
-        print(f"[ERROR] handle_address_input: Ошибка - {e}")
+        logging.error(f"handle_address_input: Ошибка - {e}", exc_info=True)
         bot.send_message(user_id, loc["error_generic"])
 
 @bot.message_handler(content_types=['text'])
 def debug_text_handler(message):
     user_id = message.from_user.id
-    print(f"[DEBUG] Text message received: user_id={user_id}, text={message.text}")
+    logging.debug(f"Text message received: user_id={user_id}, text={message.text}")
     bot.send_message(message.chat.id, "⚠️ Пожалуйста, выберите действие из меню.")
 
 if __name__ == "__main__":
     try:
         bot.polling(none_stop=True, interval=5, timeout=30)
     except Exception as e:
-        print(f"[ERROR] Polling error: {e}")
+        logging.error(f"Polling error: {e}", exc_info=True)
     finally:
         db.close()
